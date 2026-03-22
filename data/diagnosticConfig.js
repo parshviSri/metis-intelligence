@@ -8,6 +8,13 @@ import {
 
 export const basicInfoFields = [
   {
+    name: "businessName",
+    label: "Business Name",
+    type: "text",
+    required: true,
+    placeholder: "e.g. Bloom Skincare",
+  },
+  {
     name: "businessType",
     label: "Business Type",
     type: "select",
@@ -178,12 +185,25 @@ export const focusAreas = [
   },
 ];
 
+/** Fields for the new Step 5 – Challenges (collects biggest_challenge for the API). */
+export const challengesFields = [
+  {
+    name: "biggestChallenge",
+    label: "What is your biggest business challenge right now?",
+    type: "textarea",
+    required: true,
+    placeholder:
+      "e.g. Our CAC has risen 40% in the last quarter and we can't find a sustainable channel to scale without margin erosion.",
+  },
+];
+
 export const wizardStepLabels = [
   "Basic Business Info",
   "Core Metrics",
   "Focus Selection",
   "Dynamic Questions",
   "Smart Prompts",
+  "Challenges",
   "Results",
 ];
 
