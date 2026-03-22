@@ -1,63 +1,43 @@
+/**
+ * pages/diagnostic.js
+ * ─────────────────────────────────────────────────────────────────────────────
+ * Multi-step business diagnostic wizard for Metis Intelligence.
+ *
+ * Step flow (keys):
+ *  basic → core → focus → dynamic → [smart] → challenges → results
+ *
+ * State & API submission are fully owned by useDiagnostic().
+ * All field definitions come from data/diagnosticConfig.js.
+ * All API logic lives in services/diagnosticService.js.
+ * ─────────────────────────────────────────────────────────────────────────────
+ */
+
 import { useMemo, useState } from "react";
-import Link from "next/link";
 import {
   ArrowLeft,
   ArrowRight,
   CheckCircle2,
   Lightbulb,
+  Loader2,
   Sparkles,
+  XCircle,
 } from "lucide-react";
 import Nav from "../components/layout/Nav";
 import Footer from "../components/layout/Footer";
 import Card from "../components/ui/Card";
 import ProgressBar from "../components/diagnostic/ProgressBar";
 import DiagnosticResults from "../components/diagnostic/DiagnosticResults";
+import useDiagnostic from "../hooks/useDiagnostic";
 import {
   basicInfoFields,
+  challengesFields,
   coreMetricFields,
   focusAreas,
   resultsCategories,
   wizardStepLabels,
 } from "../data/diagnosticConfig";
 
-const initialResponses = {
-  businessType: "",
-  products: "",
-  aov: "",
-  grossMargin: "",
-  monthlyMarketingSpend: "",
-  cac: "",
-  repeatPurchaseRate: "",
-  focusAreas: [],
-  contributionMargin: "",
-  productProfitability: "",
-  revenueBreakdown: "",
-  channels: "",
-  conversionRate: "",
-  cacByChannel: "",
-  ltv: "",
-  timeBetweenPurchases: "",
-  cohortTracking: "",
-  experiments: "",
-  funnelMetrics: "",
-  dropOffRates: "",
-};
-
-const numericValue = (value) => {
-  const parsed = Number(value);
-
-  return Number.isFinite(parsed) ? parsed : 0;
-};
-
-const clampScore = (value) => Math.max(0, Math.min(100, Math.round(value)));
-
-const average = (values) => {
-  if (!values.length) {
-    return 0;
-  }
-
-  return values.reduce((sum, value) => sum + value, 0) / values.length;
-};
+// ─── Field renderer ──────────────────────────────────────────────────────────
 
 const renderField = (field, responses, handleChange) => {
   if (field.type === "select") {
@@ -66,7 +46,7 @@ const renderField = (field, responses, handleChange) => {
         id={field.name}
         name={field.name}
         className="form-select form-select-lg"
-        value={responses[field.name]}
+        value={responses[field.name] ?? ""}
         onChange={handleChange}
       >
         <option value="" disabled>
@@ -88,7 +68,7 @@ const renderField = (field, responses, handleChange) => {
         name={field.name}
         rows="4"
         className="form-control"
-        value={responses[field.name]}
+        value={responses[field.name] ?? ""}
         onChange={handleChange}
         placeholder={field.placeholder}
       />
@@ -101,160 +81,94 @@ const renderField = (field, responses, handleChange) => {
       name={field.name}
       type={field.type}
       className="form-control form-control-lg"
-      value={responses[field.name]}
+      value={responses[field.name] ?? ""}
       onChange={handleChange}
       placeholder={field.placeholder}
     />
   );
 };
 
-const getBusinessTypeLabel = (value) => {
-  return (
-    basicInfoFields
-      .find((field) => field.name === "businessType")
-      ?.options.find((option) => option.value === value)?.label || value
-  );
-};
+// ─── Loading overlay ─────────────────────────────────────────────────────────
 
-const calculateSectionScores = (responses) => {
-  const aov = numericValue(responses.aov);
-  const grossMargin = numericValue(responses.grossMargin);
-  const cac = numericValue(responses.cac);
-  const repeatPurchaseRate = numericValue(responses.repeatPurchaseRate);
-  const contributionMargin = numericValue(responses.contributionMargin);
-  const conversionRate = numericValue(responses.conversionRate);
-  const ltv = numericValue(responses.ltv);
-  const experimentsPresent = responses.experiments.trim().length > 0 ? 1 : 0;
-  const funnelPresent = responses.funnelMetrics.trim().length > 0 ? 1 : 0;
-  const dropOffPresent = responses.dropOffRates.trim().length > 0 ? 1 : 0;
+const LoadingOverlay = () => (
+  <Card className="border-0 shadow-sm text-center py-5">
+    <div className="d-flex flex-column align-items-center gap-3">
+      {/* Animated spinner using lucide Loader2 + CSS spin */}
+      <Loader2
+        size={48}
+        className="text-primary"
+        style={{ animation: "spin 1s linear infinite" }}
+      />
+      <h3 className="h4 fw-bold text-dark mb-1">Analysing your business…</h3>
+      <p className="text-muted mb-0">
+        Our engine is crunching your metrics and building a personalised report.
+        <br />
+        This usually takes a few seconds.
+      </p>
+    </div>
+    {/* Inline keyframe for spinner */}
+    <style>{`@keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }`}</style>
+  </Card>
+);
 
-  const profitability = clampScore(
-    grossMargin * 0.7 +
-      (aov > 0 && cac > 0 ? Math.max(0, ((aov - cac) / aov) * 45) : 12) +
-      contributionMargin * 0.35,
-  );
+// ─── Error banner ─────────────────────────────────────────────────────────────
 
-  const acquisition = clampScore(
-    (aov > 0 && cac > 0 ? Math.max(0, ((aov - cac) / aov) * 55) : 15) +
-      conversionRate * 12 +
-      (responses.channels.trim() ? 18 : 0) +
-      (responses.cacByChannel.trim() ? 15 : 0),
-  );
+const ErrorBanner = ({ message, onRetry }) => (
+  <Card className="border-0 shadow-sm">
+    <div className="alert alert-danger d-flex align-items-start gap-3 mb-4">
+      <XCircle size={22} className="flex-shrink-0 mt-1" />
+      <div>
+        <div className="fw-semibold mb-1">Something went wrong</div>
+        <div className="small">{message}</div>
+      </div>
+    </div>
+    <div className="text-center">
+      <button
+        type="button"
+        className="btn btn-custom-primary"
+        onClick={onRetry}
+      >
+        Try Again
+      </button>
+    </div>
+  </Card>
+);
 
-  const retention = clampScore(
-    repeatPurchaseRate * 1.6 +
-      (ltv > 0 && cac > 0 ? Math.min(35, (ltv / cac) * 10) : 10) +
-      (responses.cohortTracking.trim() ? 15 : 0),
-  );
+// ─── Helper: get business-type label ─────────────────────────────────────────
 
-  const growth = clampScore(
-    experimentsPresent * 30 +
-      funnelPresent * 30 +
-      dropOffPresent * 25 +
-      (conversionRate > 0 ? Math.min(15, conversionRate * 3) : 0),
-  );
+const getBusinessTypeLabel = (value) =>
+  basicInfoFields
+    .find((f) => f.name === "businessType")
+    ?.options?.find((o) => o.value === value)?.label || value;
 
-  return {
-    profitability,
-    acquisition,
-    retention,
-    growth,
-  };
-};
-
-const buildInsights = (responses, sectionScores) => {
-  const insights = [];
-  const aov = numericValue(responses.aov);
-  const grossMargin = numericValue(responses.grossMargin);
-  const cac = numericValue(responses.cac);
-  const repeatPurchaseRate = numericValue(responses.repeatPurchaseRate);
-  const ltv = numericValue(responses.ltv);
-  const selectedFocusAreas = responses.focusAreas;
-
-  if (grossMargin > 0 && grossMargin < 45) {
-    insights.push({
-      title: "Margin pressure may be limiting growth quality",
-      description:
-        "Your gross margin appears relatively tight, which means inefficient spend or discounting can reduce profitability quickly.",
-    });
-  }
-
-  if (aov > 0 && cac > 0 && cac >= aov * 0.5) {
-    insights.push({
-      title: "Acquisition cost looks heavy relative to order value",
-      description:
-        "If CAC is consuming too much of first-order revenue, the business may be depending on retention or upsells to recover profitability.",
-    });
-  }
-
-  if (repeatPurchaseRate > 0 && repeatPurchaseRate < 30) {
-    insights.push({
-      title: "Retention deserves deeper attention",
-      description:
-        "A low repeat purchase rate suggests customer value may not be compounding. Improving lifecycle performance could unlock stronger economics.",
-    });
-  }
-
-  if (
-    selectedFocusAreas.includes("retention") &&
-    ltv > 0 &&
-    cac > 0 &&
-    ltv < cac * 2
-  ) {
-    insights.push({
-      title: "LTV may not be comfortably outrunning CAC",
-      description:
-        "If lifetime value remains close to acquisition cost, channel scaling becomes riskier and payback can slow down.",
-    });
-  }
-
-  if (
-    selectedFocusAreas.includes("growth") &&
-    !responses.experiments.trim()
-  ) {
-    insights.push({
-      title: "Growth experimentation may be underdeveloped",
-      description:
-        "Without clear experiments, it becomes harder to improve funnel performance systematically or learn what really drives growth.",
-    });
-  }
-
-  const lowestSection = Object.entries(sectionScores).sort((a, b) => a[1] - b[1])[0];
-
-  if (lowestSection) {
-    const sectionLabel =
-      resultsCategories.find((item) => item.key === lowestSection[0])?.label ||
-      lowestSection[0];
-
-    insights.push({
-      title: `${sectionLabel} is the biggest current opportunity`,
-      description:
-        "This area scored lowest in the diagnostic, which makes it the strongest candidate for immediate analysis and action.",
-    });
-  }
-
-  if (!insights.length) {
-    insights.push({
-      title: "Your inputs suggest a relatively balanced operating picture",
-      description:
-        "The next step is to dig deeper into section-level detail to confirm where the strongest growth leverage actually sits.",
-    });
-  }
-
-  return insights.slice(0, 4);
-};
+// ─── Main page ────────────────────────────────────────────────────────────────
 
 export default function Diagnostic() {
-  const [responses, setResponses] = useState(initialResponses);
+  // Central hook – owns all state, validation, and API submission
+  const {
+    responses,
+    status,
+    result,
+    error,
+    handleChange,
+    toggleFocusArea,
+    setResponses,
+    submit,
+    reset,
+  } = useDiagnostic();
+
   const [currentStep, setCurrentStep] = useState(0);
   const [errors, setErrors] = useState({});
 
-  const repeatPurchaseRate = numericValue(responses.repeatPurchaseRate);
+  // ── Computed ──────────────────────────────────────────────────────────────
+
+  const repeatPurchaseRate = parseFloat(responses.repeatPurchaseRate) || 0;
   const showRetentionPrompt =
     repeatPurchaseRate > 0 &&
     repeatPurchaseRate < 30 &&
     !responses.focusAreas.includes("retention");
 
+  /** Build the ordered list of wizard step keys dynamically. */
   const visibleSteps = useMemo(() => {
     const stepKeys = [
       "basic",
@@ -262,92 +176,35 @@ export default function Diagnostic() {
       "focus",
       "dynamic",
       ...(showRetentionPrompt ? ["smart"] : []),
+      "challenges",
       "results",
     ];
-
     return stepKeys.map((key) => ({
       key,
       label:
         key === "smart"
           ? "Smart Prompts"
+          : key === "challenges"
+          ? "Challenges"
           : wizardStepLabels[
-              ["basic", "core", "focus", "dynamic", "smart", "results"].indexOf(
-                key,
-              )
+              ["basic", "core", "focus", "dynamic", "smart", "challenges", "results"].indexOf(key)
             ],
     }));
   }, [showRetentionPrompt]);
 
   const currentStepKey = visibleSteps[currentStep]?.key;
   const selectedFocusAreas = focusAreas.filter((area) =>
-    responses.focusAreas.includes(area.key),
+    responses.focusAreas.includes(area.key)
   );
 
-  const sectionScores = useMemo(
-    () => calculateSectionScores(responses),
-    [responses],
-  );
-
-  const displayedSectionScores = useMemo(() => {
-    const focusKeys =
-      responses.focusAreas.length > 0
-        ? responses.focusAreas
-        : resultsCategories.map((item) => item.key);
-
-    return resultsCategories
-      .filter((item) => focusKeys.includes(item.key))
-      .map((item) => ({
-        ...item,
-        score: sectionScores[item.key],
-      }));
-  }, [responses.focusAreas, sectionScores]);
-
-  const overallScore = clampScore(
-    average(displayedSectionScores.map((item) => item.score)),
-  );
-
-  const insights = useMemo(
-    () => buildInsights(responses, sectionScores),
-    [responses, sectionScores],
-  );
-
-  const handleChange = (event) => {
-    const { name, value } = event.target;
-
-    setResponses((current) => ({
-      ...current,
-      [name]: value,
-    }));
-    setErrors((current) => ({
-      ...current,
-      [name]: "",
-      focusAreas: "",
-    }));
-  };
-
-  const toggleFocusArea = (areaKey) => {
-    setResponses((current) => {
-      const isSelected = current.focusAreas.includes(areaKey);
-
-      return {
-        ...current,
-        focusAreas: isSelected
-          ? current.focusAreas.filter((item) => item !== areaKey)
-          : [...current.focusAreas, areaKey],
-      };
-    });
-    setErrors((current) => ({
-      ...current,
-      focusAreas: "",
-    }));
-  };
+  // ── Per-step validation ──────────────────────────────────────────────────
 
   const validateStep = () => {
     const nextErrors = {};
 
     if (currentStepKey === "basic") {
       basicInfoFields.forEach((field) => {
-        if (!responses[field.name]) {
+        if (field.required && !responses[field.name]) {
           nextErrors[field.name] = "This field is required.";
         }
       });
@@ -355,49 +212,79 @@ export default function Diagnostic() {
 
     if (currentStepKey === "core") {
       coreMetricFields.forEach((field) => {
-        if (!responses[field.name]) {
+        if (field.required && !responses[field.name]) {
           nextErrors[field.name] = "This field is required.";
         }
       });
     }
 
     if (currentStepKey === "focus" && responses.focusAreas.length === 0) {
-      nextErrors.focusAreas = "Select at least one area to analyze.";
+      nextErrors.focusAreas = "Select at least one area to analyse.";
     }
 
-    setErrors(nextErrors);
-
-    return Object.keys(nextErrors).length === 0;
-  };
-
-  const handleNext = () => {
-    if (currentStepKey !== "dynamic" && currentStepKey !== "smart") {
-      if (!validateStep()) {
-        return;
+    if (currentStepKey === "challenges") {
+      if (!responses.biggestChallenge?.trim()) {
+        nextErrors.biggestChallenge = "Please describe your biggest challenge.";
       }
     }
 
-    setCurrentStep((step) => Math.min(step + 1, visibleSteps.length - 1));
+    setErrors(nextErrors);
+    return Object.keys(nextErrors).length === 0;
+  };
+
+  // ── Navigation ────────────────────────────────────────────────────────────
+
+  const handleNext = async () => {
+    // dynamic & smart steps are optional – skip validation
+    if (currentStepKey !== "dynamic" && currentStepKey !== "smart") {
+      if (!validateStep()) return;
+    }
+
+    const nextIndex = currentStep + 1;
+    const nextKey = visibleSteps[nextIndex]?.key;
+
+    if (nextKey === "results") {
+      // Trigger API call; the loading/error/success states handle the rest
+      await submit();
+    }
+
+    setCurrentStep((s) => Math.min(s + 1, visibleSteps.length - 1));
   };
 
   const handleBack = () => {
-    setCurrentStep((step) => Math.max(step - 1, 0));
+    // If we're back on the Results step after a submit error, reset API state
+    if (currentStepKey === "results") reset();
+    setCurrentStep((s) => Math.max(s - 1, 0));
   };
 
   const addRetentionFocus = () => {
     if (!responses.focusAreas.includes("retention")) {
-      setResponses((current) => ({
-        ...current,
-        focusAreas: [...current.focusAreas, "retention"],
+      setResponses((prev) => ({
+        ...prev,
+        focusAreas: [...prev.focusAreas, "retention"],
       }));
     }
-    setCurrentStep(visibleSteps.findIndex((step) => step.key === "dynamic"));
+    setCurrentStep(visibleSteps.findIndex((s) => s.key === "dynamic"));
   };
+
+  // ── Retry after error ─────────────────────────────────────────────────────
+
+  const handleRetry = () => {
+    reset();
+    // Go back to challenges step so user can review before resubmitting
+    const challengesIndex = visibleSteps.findIndex((s) => s.key === "challenges");
+    setCurrentStep(challengesIndex >= 0 ? challengesIndex : 0);
+  };
+
+  // ─────────────────────────────────────────────────────────────────────────
+  // RENDER
+  // ─────────────────────────────────────────────────────────────────────────
 
   return (
     <div className="min-vh-100 bg-white" id="top">
       <Nav />
       <main>
+        {/* Hero banner */}
         <section
           className="py-5"
           style={{
@@ -424,18 +311,21 @@ export default function Diagnostic() {
           </div>
         </section>
 
+        {/* Wizard */}
         <section className="py-5">
           <div className="container">
             <div className="row g-4 align-items-start">
+              {/* ── Main form card ── */}
               <div className="col-12 col-lg-8">
                 <Card className="border-0 shadow-sm">
                   <ProgressBar
                     currentStep={currentStep}
                     totalSteps={visibleSteps.length}
-                    labels={visibleSteps.map((step) => step.label)}
+                    labels={visibleSteps.map((s) => s.label)}
                   />
 
                   <div className="mt-5">
+                    {/* ════════════════ STEP: basic ════════════════ */}
                     {currentStepKey === "basic" && (
                       <div>
                         <div className="mb-4">
@@ -471,6 +361,7 @@ export default function Diagnostic() {
                       </div>
                     )}
 
+                    {/* ════════════════ STEP: core ════════════════ */}
                     {currentStepKey === "core" && (
                       <div>
                         <div className="mb-4">
@@ -506,6 +397,7 @@ export default function Diagnostic() {
                       </div>
                     )}
 
+                    {/* ════════════════ STEP: focus ════════════════ */}
                     {currentStepKey === "focus" && (
                       <div>
                         <div className="mb-4">
@@ -513,7 +405,7 @@ export default function Diagnostic() {
                             Step 3
                           </span>
                           <h2 className="display-6 fw-bold text-dark mt-2 mb-3">
-                            What would you like to analyze?
+                            What would you like to analyse?
                           </h2>
                           <p className="text-muted mb-0">
                             Choose one or more focus areas. The next step will
@@ -523,12 +415,11 @@ export default function Diagnostic() {
                         <div className="row g-3">
                           {focusAreas.map((area) => {
                             const selected = responses.focusAreas.includes(area.key);
-
                             return (
                               <div key={area.key} className="col-12 col-md-6">
                                 <button
                                   type="button"
-                                  className={`w-100 text-start btn p-0 border-0 bg-transparent`}
+                                  className="w-100 text-start btn p-0 border-0 bg-transparent"
                                   onClick={() => toggleFocusArea(area.key)}
                                 >
                                   <div
@@ -548,10 +439,7 @@ export default function Diagnostic() {
                                             backgroundColor: `${area.color}18`,
                                           }}
                                         >
-                                          <area.icon
-                                            size={24}
-                                            style={{ color: area.color }}
-                                          />
+                                          <area.icon size={24} style={{ color: area.color }} />
                                         </div>
                                         <h3 className="h5 fw-bold text-dark">
                                           {area.title}
@@ -581,6 +469,7 @@ export default function Diagnostic() {
                       </div>
                     )}
 
+                    {/* ════════════════ STEP: dynamic ════════════════ */}
                     {currentStepKey === "dynamic" && (
                       <div>
                         <div className="mb-4">
@@ -641,6 +530,7 @@ export default function Diagnostic() {
                       </div>
                     )}
 
+                    {/* ════════════════ STEP: smart ════════════════ */}
                     {currentStepKey === "smart" && (
                       <div>
                         <div className="mb-4">
@@ -670,8 +560,7 @@ export default function Diagnostic() {
                               </div>
                               <p className="text-muted mb-3">
                                 Your repeat purchase rate is currently below our
-                                retention threshold. Want to explore this
-                                further?
+                                retention threshold. Want to explore this further?
                               </p>
                               <div className="d-flex flex-column flex-sm-row gap-3">
                                 <button
@@ -686,7 +575,7 @@ export default function Diagnostic() {
                                   className="btn btn-outline-dark"
                                   onClick={handleNext}
                                 >
-                                  Continue to Results
+                                  Skip — Continue to Challenges
                                 </button>
                               </div>
                             </div>
@@ -695,142 +584,199 @@ export default function Diagnostic() {
                       </div>
                     )}
 
-                    {currentStepKey === "results" && (
+                    {/* ════════════════ STEP: challenges ════════════════ */}
+                    {currentStepKey === "challenges" && (
                       <div>
                         <div className="mb-4">
                           <span className="text-uppercase small fw-bold text-primary">
-                            Results
+                            {visibleSteps.findIndex((s) => s.key === "challenges") + 1 > 0
+                              ? `Step ${visibleSteps.findIndex((s) => s.key === "challenges") + 1}`
+                              : "Final Step"}
                           </span>
                           <h2 className="display-6 fw-bold text-dark mt-2 mb-3">
-                            Your business diagnostic summary
+                            Your biggest challenge
                           </h2>
                           <p className="text-muted mb-0">
-                            A directional view of overall business health and
-                            the areas most worth investigating next.
+                            Tell us what is holding back your growth right now.
+                            The more specific you are, the sharper the
+                            recommendations.
                           </p>
                         </div>
-                        <DiagnosticResults
-                          overallScore={overallScore}
-                          sectionScores={sectionScores}
-                          insights={insights}
-                          selectedResults={displayedSectionScores}
-                        />
+                        <div className="row g-3">
+                          {challengesFields.map((field) => (
+                            <div key={field.name} className="col-12">
+                              <label
+                                htmlFor={field.name}
+                                className="form-label fw-semibold"
+                              >
+                                {field.label}
+                              </label>
+                              {renderField(field, responses, handleChange)}
+                              {errors[field.name] && (
+                                <div className="text-danger small mt-2">
+                                  {errors[field.name]}
+                                </div>
+                              )}
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+
+                    {/* ════════════════ STEP: results ════════════════ */}
+                    {currentStepKey === "results" && (
+                      <div>
+                        {/* Loading */}
+                        {status === "loading" && <LoadingOverlay />}
+
+                        {/* Error */}
+                        {status === "error" && (
+                          <ErrorBanner message={error} onRetry={handleRetry} />
+                        )}
+
+                        {/* Success – render report */}
+                        {status === "success" && result && (
+                          <DiagnosticResults result={result} onRetry={handleRetry} />
+                        )}
+
+                        {/* Idle fallback – should not normally be visible, but shown
+                            if the user somehow lands here without submitting */}
+                        {status === "idle" && (
+                          <div className="text-center py-4">
+                            <p className="text-muted mb-3">
+                              Click &ldquo;Get My Report&rdquo; to submit your
+                              diagnostic.
+                            </p>
+                          </div>
+                        )}
                       </div>
                     )}
                   </div>
 
+                  {/* ── Navigation buttons ── */}
                   {currentStepKey !== "results" && (
-                    <div className="d-flex flex-column flex-sm-row justify-content-between gap-3 mt-5 pt-4 border-top">
+                    <div className="d-flex justify-content-between mt-5 pt-4 border-top">
                       <button
                         type="button"
-                        className="btn btn-outline-dark"
+                        className="btn btn-outline-dark d-flex align-items-center gap-2"
                         onClick={handleBack}
                         disabled={currentStep === 0}
                       >
-                        <ArrowLeft size={18} className="me-2" />
-                        Back
+                        <ArrowLeft size={18} /> Back
                       </button>
+
                       {currentStepKey !== "smart" && (
                         <button
                           type="button"
-                          className="btn btn-custom-primary"
+                          className="btn btn-custom-primary d-flex align-items-center gap-2"
                           onClick={handleNext}
                         >
-                          {currentStep === visibleSteps.length - 2
-                            ? "See Results"
-                            : "Continue"}
-                          <ArrowRight size={18} className="ms-2" />
+                          {visibleSteps[currentStep + 1]?.key === "results"
+                            ? "Get My Report"
+                            : "Next"}
+                          <ArrowRight size={18} />
                         </button>
                       )}
+                    </div>
+                  )}
+
+                  {/* Back button on results step for non-success states */}
+                  {currentStepKey === "results" && status !== "success" && status !== "loading" && (
+                    <div className="d-flex justify-content-start mt-4 pt-3 border-top">
+                      <button
+                        type="button"
+                        className="btn btn-outline-dark d-flex align-items-center gap-2"
+                        onClick={handleBack}
+                      >
+                        <ArrowLeft size={18} /> Back
+                      </button>
                     </div>
                   )}
                 </Card>
               </div>
 
+              {/* ── Sidebar tips ── */}
               <div className="col-12 col-lg-4">
-                <div className="d-flex flex-column gap-4">
-                  <Card
-                    className="border-0 shadow-sm"
-                    style={{
-                      background:
-                        "linear-gradient(135deg, rgba(25,135,84,0.08) 0%, rgba(255,255,255,1) 100%)",
-                    }}
-                  >
-                    <div className="d-flex align-items-center gap-2 mb-3">
-                      <Sparkles className="text-success" size={20} />
-                      <h2 className="h5 fw-bold text-dark mb-0">
-                        What this tool does
-                      </h2>
+                <Card
+                  className="border-0 shadow-sm"
+                  style={{
+                    background:
+                      "linear-gradient(135deg, rgba(0,150,199,0.06) 0%, rgba(255,255,255,1) 100%)",
+                  }}
+                >
+                  <div className="d-flex align-items-center gap-2 mb-3">
+                    <Sparkles className="text-primary" size={20} />
+                    <h3 className="h5 fw-bold text-dark mb-0">How it works</h3>
+                  </div>
+                  <ul className="list-unstyled text-muted small mb-0 d-flex flex-column gap-3">
+                    {[
+                      {
+                        icon: "①",
+                        text: "Fill in your business basics and core metrics in Steps 1 & 2.",
+                      },
+                      {
+                        icon: "②",
+                        text: "Select the areas you want to analyse and answer the tailored follow-up questions.",
+                      },
+                      {
+                        icon: "③",
+                        text: "Describe your biggest challenge so the engine can personalise recommendations.",
+                      },
+                      {
+                        icon: "④",
+                        text: "Receive a Business Health Score, key insights, and prioritised recommendations instantly.",
+                      },
+                    ].map(({ icon, text }) => (
+                      <li key={icon} className="d-flex align-items-start gap-2">
+                        <span className="fw-bold text-primary flex-shrink-0">
+                          {icon}
+                        </span>
+                        <span>{text}</span>
+                      </li>
+                    ))}
+                  </ul>
+                </Card>
+
+                {/* Mini summary card – shows entered data as context */}
+                {(responses.businessName || responses.businessType) && (
+                  <Card className="border-0 shadow-sm mt-3">
+                    <div className="small text-uppercase fw-bold text-muted mb-3">
+                      Your Business
                     </div>
-                    <ul className="text-muted ps-3 mb-0">
-                      <li className="mb-2">
-                        Collects the core numbers behind your business model
-                      </li>
-                      <li className="mb-2">
-                        Adapts follow-up questions to the areas you care about
-                      </li>
-                      <li>
-                        Produces focused, founder-friendly strategic insight
-                      </li>
+                    <ul className="list-unstyled small text-dark mb-0 d-flex flex-column gap-2">
+                      {responses.businessName && (
+                        <li>
+                          <span className="text-muted">Name: </span>
+                          {responses.businessName}
+                        </li>
+                      )}
+                      {responses.businessType && (
+                        <li>
+                          <span className="text-muted">Type: </span>
+                          {getBusinessTypeLabel(responses.businessType)}
+                        </li>
+                      )}
+                      {responses.aov && (
+                        <li>
+                          <span className="text-muted">AOV: </span>₹
+                          {Number(responses.aov).toLocaleString()}
+                        </li>
+                      )}
+                      {responses.grossMargin && (
+                        <li>
+                          <span className="text-muted">Margin: </span>
+                          {responses.grossMargin}%
+                        </li>
+                      )}
+                      {responses.cac && (
+                        <li>
+                          <span className="text-muted">CAC: </span>₹
+                          {Number(responses.cac).toLocaleString()}
+                        </li>
+                      )}
                     </ul>
                   </Card>
-
-                  <Card className="border-0 shadow-sm">
-                    <div className="small text-uppercase fw-bold text-primary mb-2">
-                      Response snapshot
-                    </div>
-                    <div className="d-flex flex-column gap-3">
-                      <div className="rounded-3 bg-light p-3">
-                        <div className="small text-muted mb-1">Business Type</div>
-                        <div className="fw-semibold text-dark">
-                          {responses.businessType
-                            ? getBusinessTypeLabel(responses.businessType)
-                            : "Not answered yet"}
-                        </div>
-                      </div>
-                      <div className="rounded-3 bg-light p-3">
-                        <div className="small text-muted mb-1">Products</div>
-                        <div className="fw-semibold text-dark">
-                          {responses.products || "Not answered yet"}
-                        </div>
-                      </div>
-                      <div className="rounded-3 bg-light p-3">
-                        <div className="small text-muted mb-1">
-                          Selected Focus Areas
-                        </div>
-                        <div className="d-flex flex-wrap gap-2">
-                          {responses.focusAreas.length > 0 ? (
-                            selectedFocusAreas.map((area) => (
-                              <span
-                                key={area.key}
-                                className="badge rounded-pill text-bg-light border"
-                              >
-                                {area.title}
-                              </span>
-                            ))
-                          ) : (
-                            <span className="text-muted small">
-                              None selected yet
-                            </span>
-                          )}
-                        </div>
-                      </div>
-                    </div>
-                  </Card>
-
-                  <Card className="border-0 shadow-sm">
-                    <div className="small text-uppercase fw-bold text-primary mb-2">
-                      Need help instead?
-                    </div>
-                    <p className="text-muted">
-                      If you would rather talk through the numbers with us, we
-                      can help you interpret the right questions faster.
-                    </p>
-                    <Link href="/contact" className="btn btn-outline-dark">
-                      Contact Metis Intelligence
-                    </Link>
-                  </Card>
-                </div>
+                )}
               </div>
             </div>
           </div>
