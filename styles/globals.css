@@ -1,5 +1,19 @@
-@import url("https://fonts.googleapis.com/css2?family=Inter:wght@400;500;700&family=Plus+Jakarta+Sans:wght@600;700&display=swap");
+/* All @import statements must come first (PostCSS rule) */
+@import url("https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Plus+Jakarta+Sans:wght@600;700&display=swap");
 @import "bootstrap/dist/css/bootstrap.min.css";
+
+/* ── Tailwind layers (prefixed "tw-", preflight OFF – keeps Bootstrap intact) ── */
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* ── Auth page overrides ────────────────────────────────────────────────────── */
+/* Remove the global body padding-top on auth pages so the centered layout
+   isn't pushed down by the fixed navbar offset */
+body.auth-page {
+  padding-top: 0 !important;
+  background: #f8fafc !important;
+}
 
 /* Custom styles */
 body {
