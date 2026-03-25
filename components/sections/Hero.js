@@ -15,14 +15,14 @@ const Hero = () => {
               PULSE analytics framework.
             </p>
             <div className="d-flex flex-column flex-sm-row gap-3">
-              <Link href="/diagnostic" passHref>
+              <Link href="/signup" passHref>
                 <Button variant="primary" className="btn-hover">
-                  Start Free Diagnostic
+                  Start Free Diagnostic →
                 </Button>
               </Link>
-              <Link href="/framework" passHref>
+              <Link href="/login" passHref>
                 <Button variant="secondary" className="btn-hover">
-                  Explore the Framework
+                  Sign in
                 </Button>
               </Link>
             </div>
