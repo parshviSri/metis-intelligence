@@ -13,6 +13,7 @@
  */
 
 import { useMemo, useState } from "react";
+import withAuth from "../components/auth/withAuth";
 import {
   ArrowLeft,
   ArrowRight,
@@ -143,7 +144,7 @@ const getBusinessTypeLabel = (value) =>
 
 // ─── Main page ────────────────────────────────────────────────────────────────
 
-export default function Diagnostic() {
+function Diagnostic() {
   // Central hook – owns all state, validation, and API submission
   const {
     responses,
@@ -786,3 +787,5 @@ export default function Diagnostic() {
     </div>
   );
 }
+
+export default withAuth(Diagnostic);

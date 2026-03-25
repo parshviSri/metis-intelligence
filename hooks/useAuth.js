@@ -118,7 +118,9 @@ const useAuth = () => {
       return { success: false };
     }
 
-    router.push("/dashboard");
+    // Respect ?next= param set by withAuth HOC, fall back to /diagnostic
+    const next = router.query.next;
+    router.push(typeof next === "string" && next.startsWith("/") ? next : "/diagnostic");
     return { success: true };
   }, [router]);
 
@@ -135,10 +137,15 @@ const useAuth = () => {
     setLoading(true);
     setError(null);
 
+    // Preserve ?next= so the OAuth callback can land on the right page
+    const next = router.query.next;
+    const safeNext =
+      typeof next === "string" && next.startsWith("/") ? next : "/diagnostic";
+
     const { error: sbError } = await supabase.auth.signInWithOAuth({
       provider: "google",
       options: {
-        redirectTo: `${window.location.origin}/dashboard`,
+        redirectTo: `${window.location.origin}${safeNext}`,
       },
     });
 

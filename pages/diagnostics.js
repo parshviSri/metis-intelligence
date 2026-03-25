@@ -40,6 +40,7 @@ import Footer from "../components/layout/Footer";
 import Card from "../components/ui/Card";
 import DiagnosticResults from "../components/diagnostic/DiagnosticResults";
 import { getDiagnostic, listDiagnostics } from "../services/diagnosticService";
+import withAuth from "../components/auth/withAuth";
 
 // ─── Constants ─────────────────────────────────────────────────────────────────
 
@@ -202,7 +203,7 @@ const SummaryCard = ({ summary, isExpanded, onToggle, detail, detailStatus, deta
 
 // ─── Main page ─────────────────────────────────────────────────────────────────
 
-export default function DiagnosticsHistory() {
+function DiagnosticsHistory() {
   const [summaries, setSummaries] = useState([]);
   const [listStatus, setListStatus] = useState("idle");
   const [listError, setListError] = useState(null);
@@ -424,3 +425,5 @@ export default function DiagnosticsHistory() {
     </div>
   );
 }
+
+export default withAuth(DiagnosticsHistory);
