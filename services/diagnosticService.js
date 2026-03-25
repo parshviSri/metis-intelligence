@@ -1,22 +1,81 @@
 /**
  * diagnosticService.js
  * ─────────────────────────────────────────────────────────────────────────────
- * Single-responsibility API layer for the Metis Intelligence diagnostic form.
+ * API layer for the Metis Intelligence diagnostic platform.
  *
- * Responsibilities:
- *  1. Normalise / clean raw form state into the exact JSON shape the backend expects.
- *  2. Send POST /api/v1/diagnostic/submit with proper headers & error handling.
- *  3. Return a structured result object  { data, error } – never throws.
+ * Endpoints covered:
+ *  POST   /api/v1/diagnostic/submit          → submitDiagnostic()
+ *  GET    /api/v1/diagnostic/{diagnostic_id} → getDiagnostic()
+ *  GET    /api/v1/diagnostics                → listDiagnostics()
+ *  GET    /health                            → checkHealth()
  *
+ * All public functions return { data, error } – they never throw.
  * Keep this file free of any React or UI concerns.
  * ─────────────────────────────────────────────────────────────────────────────
  */
 
 /** Base URL reads from Next.js public env var; falls back to localhost for dev. */
-const API_BASE =
+export const API_BASE =
   process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
 
-const ENDPOINT = `${API_BASE}/api/v1/diagnostic/submit`;
+// ─── Shared fetch helper ──────────────────────────────────────────────────────
+
+/**
+ * apiFetch(path, options)
+ *
+ * Thin wrapper around fetch that:
+ *  - Prepends API_BASE
+ *  - Sets JSON Accept/Content-Type headers
+ *  - Parses FastAPI error bodies into a human-readable string
+ *  - Never throws – always returns { data, error }
+ *
+ * @param  {string}  path     e.g. "/health" or "/api/v1/diagnostics"
+ * @param  {object}  options  Standard fetch options (method, body, etc.)
+ * @returns {Promise<{ data: any|null, error: string|null }>}
+ */
+const apiFetch = async (path, options = {}) => {
+  const url = `${API_BASE}${path}`;
+  const defaultHeaders = { Accept: "application/json" };
+
+  // Only add Content-Type for requests with a body
+  if (options.body) {
+    defaultHeaders["Content-Type"] = "application/json";
+  }
+
+  try {
+    const response = await fetch(url, {
+      ...options,
+      headers: { ...defaultHeaders, ...options.headers },
+    });
+
+    if (!response.ok) {
+      let detail = `Server error (${response.status})`;
+      try {
+        const errBody = await response.json();
+        // FastAPI validation errors: { detail: string | [{msg, loc}, …] }
+        if (typeof errBody.detail === "string") {
+          detail = errBody.detail;
+        } else if (Array.isArray(errBody.detail)) {
+          detail = errBody.detail
+            .map((e) => `${e.loc?.slice(-1)[0] ?? "field"}: ${e.msg}`)
+            .join("; ");
+        }
+      } catch {
+        // ignore JSON parse failure
+      }
+      return { data: null, error: detail };
+    }
+
+    const data = await response.json();
+    return { data, error: null };
+  } catch (networkError) {
+    const message =
+      networkError instanceof TypeError
+        ? "Unable to reach the server. Please check your connection and try again."
+        : `An unexpected error occurred: ${networkError.message}`;
+    return { data: null, error: message };
+  }
+};
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -33,7 +92,7 @@ const toNumber = (value) => {
 
 /**
  * Convert the channels field to a clean string array.
- * Accepts:  array, comma-separated string, or single string.
+ * Accepts: array, comma-separated string, or single string.
  */
 const toChannelsArray = (value) => {
   if (Array.isArray(value)) {
@@ -53,22 +112,22 @@ const toChannelsArray = (value) => {
 /**
  * normalisePayload(responses)
  *
- * Transforms the raw multi-step form state object into the clean JSON payload
- * that POST /api/v1/diagnostic/submit expects.
+ * Transforms the raw multi-step form state into the JSON payload that
+ * POST /api/v1/diagnostic/submit expects.
  *
- * Field mapping:
- *   responses.businessName          → business_name        (string)
- *   responses.businessType          → business_type        (string)
- *   responses.products              → products             (string)
- *   responses.aov                   → aov                  (number)
- *   responses.grossMargin           → margin               (number, %)
- *   responses.monthlyMarketingSpend → marketing_spend      (number)
- *   responses.cac                   → cac                  (number)
- *   responses.repeatPurchaseRate    → repeat_purchase_rate (number, %)
- *   responses.channels              → channels             (string[])
- *   responses.conversionRate        → conversion_rate      (number, %)
- *   responses.biggestChallenge      → biggest_challenge    (string)
- *   everything else                 → additional_inputs    (dict)
+ * Field mapping (camelCase form → snake_case API):
+ *   businessName          → business_name
+ *   businessType          → business_type
+ *   products              → products
+ *   aov                   → aov
+ *   grossMargin           → margin
+ *   monthlyMarketingSpend → marketing_spend
+ *   cac                   → cac
+ *   repeatPurchaseRate    → repeat_purchase_rate
+ *   channels              → channels
+ *   conversionRate        → conversion_rate
+ *   biggestChallenge      → biggest_challenge
+ *   everything else       → additional_inputs
  *
  * @param  {object} responses  Raw form state from the wizard
  * @returns {object}           Clean payload ready to JSON.stringify
@@ -86,7 +145,7 @@ export const normalisePayload = (responses) => {
     channels,
     conversionRate,
     biggestChallenge,
-    // Capture everything else for additional_inputs
+    // Optional / additional_inputs fields
     focusAreas,
     contributionMargin,
     productProfitability,
@@ -115,7 +174,7 @@ export const normalisePayload = (responses) => {
     conversion_rate: toNumber(conversionRate),
     biggest_challenge: (biggestChallenge || "").trim(),
 
-    // ── Catch-all for optional/dynamic fields ─────────────────────────────
+    // ── Optional context forwarded to the LLM ────────────────────────────
     additional_inputs: {
       focus_areas: Array.isArray(focusAreas) ? focusAreas : [],
       contribution_margin: toNumber(contributionMargin),
@@ -139,11 +198,10 @@ export const normalisePayload = (responses) => {
  * validatePayload(payload)
  *
  * Client-side guard before sending to the API.
- * Returns an array of human-readable error strings.
- * Empty array means the payload is valid.
+ * Returns an array of human-readable error strings (empty = valid).
  *
  * @param  {object} payload  Normalised payload from normalisePayload()
- * @returns {string[]}       Validation error messages
+ * @returns {string[]}
  */
 export const validatePayload = (payload) => {
   const errors = [];
@@ -182,71 +240,75 @@ export const validatePayload = (payload) => {
   return errors;
 };
 
-// ─── API Call ─────────────────────────────────────────────────────────────────
+// ─── API Calls ────────────────────────────────────────────────────────────────
 
 /**
  * submitDiagnostic(responses)
  *
- * Main entry point called by the UI.
+ * POST /api/v1/diagnostic/submit
  *
- * Normalises → validates → sends POST → returns { data | error }.
- * Never throws so callers can safely do:
- *
- *   const { data, error } = await submitDiagnostic(responses);
+ * Normalises → validates → sends → returns { data: DiagnosticResponse | null, error }.
  *
  * @param  {object} responses  Raw form state from the wizard
  * @returns {Promise<{ data: object|null, error: string|null }>}
  */
 export const submitDiagnostic = async (responses) => {
-  // 1. Normalise
   const payload = normalisePayload(responses);
 
-  // 2. Client-side validation
   const validationErrors = validatePayload(payload);
   if (validationErrors.length > 0) {
     return { data: null, error: validationErrors.join(" ") };
   }
 
-  // 3. Send to backend
-  try {
-    const response = await fetch(ENDPOINT, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Accept: "application/json",
-      },
-      body: JSON.stringify(payload),
-    });
+  return apiFetch("/api/v1/diagnostic/submit", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+};
 
-    // 4a. Non-2xx → extract detail from FastAPI error body
-    if (!response.ok) {
-      let detail = `Server error (${response.status})`;
-      try {
-        const errBody = await response.json();
-        // FastAPI validation errors come back as { detail: [ {msg, loc}, … ] }
-        if (typeof errBody.detail === "string") {
-          detail = errBody.detail;
-        } else if (Array.isArray(errBody.detail)) {
-          detail = errBody.detail
-            .map((e) => `${e.loc?.slice(-1)[0] ?? "field"}: ${e.msg}`)
-            .join("; ");
-        }
-      } catch {
-        // ignore parse failure – keep status-based message
-      }
-      return { data: null, error: detail };
-    }
-
-    // 4b. Success – parse JSON
-    const data = await response.json();
-    return { data, error: null };
-
-  } catch (networkError) {
-    // Network failure, CORS, timeout, etc.
-    const message =
-      networkError instanceof TypeError
-        ? "Unable to reach the server. Please check your connection and try again."
-        : `An unexpected error occurred: ${networkError.message}`;
-    return { data: null, error: message };
+/**
+ * getDiagnostic(diagnosticId)
+ *
+ * GET /api/v1/diagnostic/{diagnostic_id}
+ *
+ * Retrieves the full DiagnosticResponse for a previously submitted diagnostic.
+ * Returns 404-derived error if the ID does not exist or has no report yet.
+ *
+ * @param  {number|string} diagnosticId
+ * @returns {Promise<{ data: object|null, error: string|null }>}
+ */
+export const getDiagnostic = async (diagnosticId) => {
+  if (!diagnosticId) {
+    return { data: null, error: "A diagnostic ID is required." };
   }
+  return apiFetch(`/api/v1/diagnostic/${diagnosticId}`);
+};
+
+/**
+ * listDiagnostics(options)
+ *
+ * GET /api/v1/diagnostics
+ *
+ * Returns a paginated list of DiagnosticSummary objects (newest first).
+ * Each item: { diagnostic_id, business_name, business_type, health_score, created_at }
+ *
+ * @param  {{ skip?: number, limit?: number }} options
+ * @returns {Promise<{ data: object[]|null, error: string|null }>}
+ */
+export const listDiagnostics = async ({ skip = 0, limit = 20 } = {}) => {
+  const params = new URLSearchParams({ skip, limit }).toString();
+  return apiFetch(`/api/v1/diagnostics?${params}`);
+};
+
+/**
+ * checkHealth()
+ *
+ * GET /health
+ *
+ * Liveness / readiness probe. Returns { status: "ok" } on success.
+ *
+ * @returns {Promise<{ data: object|null, error: string|null }>}
+ */
+export const checkHealth = async () => {
+  return apiFetch("/health");
 };

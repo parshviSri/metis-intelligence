@@ -51,9 +51,17 @@ const Nav = () => {
             <li className="nav-item">
               <Link
                 href="/diagnostic"
-                className={`nav-link ${isActive("/diagnostic") ? "active fw-bold" : ""}`}
+                className={`nav-link ${isActive("/diagnostic") && !isActive("/diagnostics") ? "active fw-bold" : ""}`}
               >
                 Diagnostic
+              </Link>
+            </li>
+            <li className="nav-item">
+              <Link
+                href="/diagnostics"
+                className={`nav-link ${isActive("/diagnostics") ? "active fw-bold" : ""}`}
+              >
+                History
               </Link>
             </li>
             <li className="nav-item">
