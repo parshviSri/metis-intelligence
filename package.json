@@ -10,11 +10,16 @@
     "test:watch": "jest --watch"
   },
   "dependencies": {
+    "@supabase/supabase-js": "^2.100.0",
+    "autoprefixer": "^10.4.27",
     "bootstrap": "^5.3.8",
     "lucide-react": "^0.577.0",
     "next": "latest",
+    "pm2": "^6.0.14",
+    "postcss": "^8.5.8",
     "react": "latest",
-    "react-dom": "latest"
+    "react-dom": "latest",
+    "tailwindcss": "^3.4.19"
   },
   "devDependencies": {
     "babel-jest": "latest",
