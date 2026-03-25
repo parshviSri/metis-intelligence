@@ -1,3 +1,4 @@
+import Link from "next/link";
 import Button from "../ui/Button";
 
 const CTA = () => {
@@ -14,9 +15,11 @@ const CTA = () => {
           Answer a few questions and uncover the biggest growth opportunity in
           your business.
         </p>
-        <Button variant="secondary" className="btn-hover btn-lg px-4 py-2">
-          Start Free Diagnostic →
-        </Button>
+        <Link href="/signup" passHref>
+          <Button variant="secondary" className="btn-hover btn-lg px-4 py-2">
+            Start Free Diagnostic →
+          </Button>
+        </Link>
       </div>
     </section>
   );
