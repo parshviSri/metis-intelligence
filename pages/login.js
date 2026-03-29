@@ -11,7 +11,7 @@
  * State handled by useAuth() hook:
  *   loading  – spinner on the submit button
  *   error    – inline red banner (friendly, non-technical copy)
- *   success  – hook redirects to /dashboard automatically
+ *   success  – hook redirects to the home page automatically
  * ─────────────────────────────────────────────────────────────────────────────
  */
 
@@ -52,10 +52,10 @@ export default function LoginPage() {
   const [password, setPassword] = useState("");
   const [fieldErrors, setFieldErrors] = useState({});
 
-  // ── If already logged in, bounce to dashboard ──────────────────────────────
+  // ── If already logged in, bounce to home ───────────────────────────────────
   useEffect(() => {
     if (!sessionLoading && session) {
-      router.replace("/dashboard");
+      router.replace("/");
     }
   }, [session, sessionLoading, router]);
 
@@ -102,7 +102,7 @@ export default function LoginPage() {
 
       <AuthCard
         title="Welcome back"
-        subtitle="Sign in to continue to your dashboard."
+        subtitle="Sign in to continue to Metis."
       >
         {/* ── Global API error banner ── */}
         {error && (

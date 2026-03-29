@@ -158,7 +158,7 @@ export default function SignupPage() {
   // ── Redirect if already authenticated ─────────────────────────────────────
   useEffect(() => {
     if (!sessionLoading && session) {
-      router.replace("/dashboard");
+      router.replace("/");
     }
   }, [session, sessionLoading, router]);
 

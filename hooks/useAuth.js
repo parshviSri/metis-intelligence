@@ -65,7 +65,7 @@ const useAuth = () => {
    * signUp(email, password)
    *
    * Creates a new account. Supabase sends a confirmation email by default.
-   * On success, redirects to /dashboard (or wherever you want post-signup).
+   * After email confirmation, users land on the home page by default.
    *
    * @returns {{ success: boolean }}
    */
@@ -78,7 +78,7 @@ const useAuth = () => {
       password,
       options:  {
         // Where Supabase should redirect after email confirmation
-        emailRedirectTo: `${window.location.origin}/dashboard`,
+        emailRedirectTo: `${window.location.origin}/`,
       },
     });
 
@@ -98,7 +98,7 @@ const useAuth = () => {
   /**
    * signIn(email, password)
    *
-   * Signs in with email + password. On success, pushes to /dashboard.
+   * Signs in with email + password. On success, pushes home by default.
    *
    * @returns {{ success: boolean }}
    */
@@ -118,9 +118,9 @@ const useAuth = () => {
       return { success: false };
     }
 
-    // Respect ?next= param set by withAuth HOC, fall back to /diagnostic
+    // Respect ?next= param set by withAuth HOC, otherwise land on home.
     const next = router.query.next;
-    router.push(typeof next === "string" && next.startsWith("/") ? next : "/diagnostic");
+    router.push(typeof next === "string" && next.startsWith("/") ? next : "/");
     return { success: true };
   }, [router]);
 
@@ -140,7 +140,7 @@ const useAuth = () => {
     // Preserve ?next= so the OAuth callback can land on the right page
     const next = router.query.next;
     const safeNext =
-      typeof next === "string" && next.startsWith("/") ? next : "/diagnostic";
+      typeof next === "string" && next.startsWith("/") ? next : "/";
 
     const { error: sbError } = await supabase.auth.signInWithOAuth({
       provider: "google",
