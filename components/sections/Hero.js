@@ -1,7 +1,10 @@
 import Link from "next/link";
 import Button from "../ui/Button";
+import { useAuthContext } from "../../context/AuthContext";
 
 const Hero = () => {
+  const { session } = useAuthContext();
+
   return (
     <section className="mb-5 py-5 bg-gradient-primary text-white">
       <div className="container">
@@ -20,11 +23,13 @@ const Hero = () => {
                   Start Free Diagnostic →
                 </Button>
               </Link>
-              <Link href="/login" passHref>
-                <Button variant="secondary" className="btn-hover">
-                  Sign in
-                </Button>
-              </Link>
+              {!session && (
+                <Link href="/login" passHref>
+                  <Button variant="secondary" className="btn-hover">
+                    Sign in
+                  </Button>
+                </Link>
+              )}
             </div>
           </div>
           <div className="col-lg-6">
