@@ -12,7 +12,7 @@
  * ─────────────────────────────────────────────────────────────────────────────
  */
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import withAuth from "../components/auth/withAuth";
 import {
   ArrowLeft,
@@ -29,6 +29,7 @@ import Card from "../components/ui/Card";
 import ProgressBar from "../components/diagnostic/ProgressBar";
 import DiagnosticResults from "../components/diagnostic/DiagnosticResults";
 import useDiagnostic from "../hooks/useDiagnostic";
+import { useAuthContext } from "../context/AuthContext";
 import {
   basicInfoFields,
   challengesFields,
@@ -142,9 +143,17 @@ const getBusinessTypeLabel = (value) =>
     .find((f) => f.name === "businessType")
     ?.options?.find((o) => o.value === value)?.label || value;
 
+const DIAGNOSTIC_ACCESS_STORAGE_PREFIX = "metis:diagnostic-access:";
+
+const defaultAccessState = () => ({
+  freeDiagnosticUsed: false,
+});
+
 // ─── Main page ────────────────────────────────────────────────────────────────
 
 function Diagnostic() {
+  const { user } = useAuthContext();
+
   // Central hook – owns all state, validation, and API submission
   const {
     responses,
@@ -160,8 +169,44 @@ function Diagnostic() {
 
   const [currentStep, setCurrentStep] = useState(0);
   const [errors, setErrors] = useState({});
+  const [accessState, setAccessState] = useState(defaultAccessState);
+  const [accessLoaded, setAccessLoaded] = useState(false);
+  const [purchaseChoice, setPurchaseChoice] = useState("free");
+
+  const userAccessStorageKey =
+    user?.id || user?.email
+      ? `${DIAGNOSTIC_ACCESS_STORAGE_PREFIX}${user.id || user.email}`
+      : null;
+
+  useEffect(() => {
+    if (!userAccessStorageKey || typeof window === "undefined") return;
+
+    try {
+      const raw = window.localStorage.getItem(userAccessStorageKey);
+      const parsed = raw ? JSON.parse(raw) : defaultAccessState();
+      setAccessState({
+        ...defaultAccessState(),
+        ...parsed,
+      });
+      setPurchaseChoice(parsed?.freeDiagnosticUsed ? "" : "free");
+    } catch {
+      setAccessState(defaultAccessState());
+      setPurchaseChoice("free");
+    } finally {
+      setAccessLoaded(true);
+    }
+  }, [userAccessStorageKey]);
 
   // ── Computed ──────────────────────────────────────────────────────────────
+
+  const isRepeatDiagnosticUser = accessState.freeDiagnosticUsed;
+  const isFullReportPurchase = purchaseChoice === "full";
+  const canSelectMultipleFocusAreas = isFullReportPurchase;
+  const step3SelectionText = isRepeatDiagnosticUser
+    ? isFullReportPurchase
+      ? "Full report unlocked. You can keep all focus areas selected."
+      : "Repeat access requires a paid selection. Choose one focus area for $1 or unlock the full report for $5."
+    : "Your first diagnostic includes one free focus area.";
 
   const repeatPurchaseRate = parseFloat(responses.repeatPurchaseRate) || 0;
   const showRetentionPrompt =
@@ -198,6 +243,35 @@ function Diagnostic() {
     responses.focusAreas.includes(area.key)
   );
 
+  useEffect(() => {
+    if (purchaseChoice !== "full") return;
+
+    const allFocusAreaKeys = focusAreas.map((area) => area.key);
+    setResponses((prev) => ({
+      ...prev,
+      focusAreas:
+        prev.focusAreas.length === allFocusAreaKeys.length
+          ? prev.focusAreas
+          : allFocusAreaKeys,
+    }));
+  }, [purchaseChoice, setResponses]);
+
+  useEffect(() => {
+    if (status !== "success" || !userAccessStorageKey || typeof window === "undefined") {
+      return;
+    }
+
+    const nextAccessState = {
+      freeDiagnosticUsed: true,
+    };
+
+    window.localStorage.setItem(
+      userAccessStorageKey,
+      JSON.stringify(nextAccessState)
+    );
+    setAccessState(nextAccessState);
+  }, [status, userAccessStorageKey]);
+
   // ── Per-step validation ──────────────────────────────────────────────────
 
   const validateStep = () => {
@@ -219,8 +293,15 @@ function Diagnostic() {
       });
     }
 
-    if (currentStepKey === "focus" && responses.focusAreas.length === 0) {
-      nextErrors.focusAreas = "Select at least one area to analyse.";
+    if (currentStepKey === "focus") {
+      if (isRepeatDiagnosticUser && !purchaseChoice) {
+        nextErrors.purchaseChoice =
+          "Choose a paid access option before continuing.";
+      }
+
+      if (responses.focusAreas.length === 0) {
+        nextErrors.focusAreas = "Select a focus area to analyse.";
+      }
     }
 
     if (currentStepKey === "challenges") {
@@ -259,12 +340,14 @@ function Diagnostic() {
   };
 
   const addRetentionFocus = () => {
-    if (!responses.focusAreas.includes("retention")) {
-      setResponses((prev) => ({
-        ...prev,
-        focusAreas: [...prev.focusAreas, "retention"],
-      }));
-    }
+    setResponses((prev) => ({
+      ...prev,
+      focusAreas: canSelectMultipleFocusAreas
+        ? prev.focusAreas.includes("retention")
+          ? prev.focusAreas
+          : [...prev.focusAreas, "retention"]
+        : ["retention"],
+    }));
     setCurrentStep(visibleSteps.findIndex((s) => s.key === "dynamic"));
   };
 
@@ -409,10 +492,83 @@ function Diagnostic() {
                             What would you like to analyse?
                           </h2>
                           <p className="text-muted mb-0">
-                            Choose one or more focus areas. The next step will
-                            adapt to match your selection.
+                            {step3SelectionText}
                           </p>
                         </div>
+                        {accessLoaded && isRepeatDiagnosticUser && (
+                          <Card
+                            className="border shadow-sm mb-4"
+                            style={{ backgroundColor: "#f8fbff" }}
+                          >
+                            <div className="d-flex flex-column gap-3">
+                              <div>
+                                <h3 className="h5 fw-bold text-dark mb-2">
+                                  Repeat diagnostic access
+                                </h3>
+                                <p className="text-muted mb-0">
+                                  Your first diagnostic is free. For another run,
+                                  unlock one focus area for $1 or the full report
+                                  for $5.
+                                </p>
+                              </div>
+                              <div className="row g-3">
+                                <div className="col-12 col-md-6">
+                                  <button
+                                    type="button"
+                                    className={`btn w-100 text-start rounded-4 border p-3 ${
+                                      purchaseChoice === "single"
+                                        ? "btn-primary"
+                                        : "btn-light"
+                                    }`}
+                                    onClick={() => {
+                                      setPurchaseChoice("single");
+                                      setResponses((prev) => ({
+                                        ...prev,
+                                        focusAreas: prev.focusAreas.slice(0, 1),
+                                      }));
+                                      setErrors((prev) => ({
+                                        ...prev,
+                                        purchaseChoice: "",
+                                      }));
+                                    }}
+                                  >
+                                    <div className="fw-bold">Single Focus Area</div>
+                                    <div className="small opacity-75">
+                                      $1 for one selected focus area in this report.
+                                    </div>
+                                  </button>
+                                </div>
+                                <div className="col-12 col-md-6">
+                                  <button
+                                    type="button"
+                                    className={`btn w-100 text-start rounded-4 border p-3 ${
+                                      purchaseChoice === "full"
+                                        ? "btn-primary"
+                                        : "btn-light"
+                                    }`}
+                                    onClick={() => {
+                                      setPurchaseChoice("full");
+                                      setErrors((prev) => ({
+                                        ...prev,
+                                        purchaseChoice: "",
+                                      }));
+                                    }}
+                                  >
+                                    <div className="fw-bold">Full Report</div>
+                                    <div className="small opacity-75">
+                                      $5 to include every focus area in one report.
+                                    </div>
+                                  </button>
+                                </div>
+                              </div>
+                              {errors.purchaseChoice && (
+                                <div className="text-danger small">
+                                  {errors.purchaseChoice}
+                                </div>
+                              )}
+                            </div>
+                          </Card>
+                        )}
                         <div className="row g-3">
                           {focusAreas.map((area) => {
                             const selected = responses.focusAreas.includes(area.key);
@@ -421,7 +577,15 @@ function Diagnostic() {
                                 <button
                                   type="button"
                                   className="w-100 text-start btn p-0 border-0 bg-transparent"
-                                  onClick={() => toggleFocusArea(area.key)}
+                                  onClick={() => {
+                                    toggleFocusArea(area.key, {
+                                      allowMultiple: canSelectMultipleFocusAreas,
+                                    });
+                                    setErrors((prev) => ({
+                                      ...prev,
+                                      focusAreas: "",
+                                    }));
+                                  }}
                                 >
                                   <div
                                     className={`rounded-4 border p-4 h-100 ${
@@ -467,6 +631,11 @@ function Diagnostic() {
                             {errors.focusAreas}
                           </div>
                         )}
+                        <div className="small text-muted mt-3">
+                          {canSelectMultipleFocusAreas
+                            ? "Full report mode is active, so every focus area can be included."
+                            : "Only one focus area can be selected at a time."}
+                        </div>
                       </div>
                     )}
 
@@ -569,7 +738,9 @@ function Diagnostic() {
                                   className="btn btn-custom-primary"
                                   onClick={addRetentionFocus}
                                 >
-                                  Add Retention Questions
+                                  {canSelectMultipleFocusAreas
+                                    ? "Add Retention Questions"
+                                    : "Switch Focus to Retention"}
                                 </button>
                                 <button
                                   type="button"
@@ -717,7 +888,7 @@ function Diagnostic() {
                       },
                       {
                         icon: "②",
-                        text: "Select the areas you want to analyse and answer the tailored follow-up questions.",
+                        text: "Pick your focus area, answer the tailored follow-up questions, and unlock broader access when needed.",
                       },
                       {
                         icon: "③",

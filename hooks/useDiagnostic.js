@@ -11,7 +11,7 @@
  *
  * Exposes helpers consumed by diagnostic.js and its sub-components:
  *  • handleChange(event)         – generic onChange for text/select/number inputs
- *  • toggleFocusArea(key)        – toggle a focus-area chip
+ *  • toggleFocusArea(key, opts)  – toggle/select a focus-area chip
  *  • setResponses(updater)       – direct escape-hatch (e.g. addRetentionFocus)
  *  • submit()                    – normalise → validate → POST → update status
  *  • reset()                     – start fresh (retry flow)
@@ -78,7 +78,7 @@ const INITIAL_RESPONSES = {
  *   result: object|null,
  *   error: string|null,
  *   handleChange: (event: Event) => void,
- *   toggleFocusArea: (key: string) => void,
+ *   toggleFocusArea: (key: string, opts?: { allowMultiple?: boolean }) => void,
  *   setResponses: React.Dispatch,
  *   submit: () => Promise<void>,
  *   reset: () => void,
@@ -107,9 +107,19 @@ const useDiagnostic = () => {
   }, []);
 
   /** Toggle a focus-area key in the focusAreas array. */
-  const toggleFocusArea = useCallback((key) => {
+  const toggleFocusArea = useCallback((key, options = {}) => {
+    const { allowMultiple = true } = options;
+
     setResponses((prev) => {
       const already = prev.focusAreas.includes(key);
+
+      if (!allowMultiple) {
+        return {
+          ...prev,
+          focusAreas: already ? [] : [key],
+        };
+      }
+
       return {
         ...prev,
         focusAreas: already
